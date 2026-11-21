@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/rgb-to-grayscale
+
 #include <cuda_runtime.h>
 
 __global__ void rgb_to_grayscale_kernel(

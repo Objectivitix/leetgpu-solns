@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/leaky-relu
+
 #include <cuda_runtime.h>
 
 #include <algorithm>

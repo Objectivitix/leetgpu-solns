@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/matrix-copy
+
 #include <cuda_runtime.h>
 
 __global__ void copy_matrix_kernel(const float *A, float *B, int total) {

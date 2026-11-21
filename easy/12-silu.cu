@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/sigmoid-linear-unit
+
 #include <cuda_runtime.h>
 
 #include <cmath>

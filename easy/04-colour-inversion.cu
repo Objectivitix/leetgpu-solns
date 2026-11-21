@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/color-inversion
+
 #include <cuda_runtime.h>
 
 __global__ void invert_kernel(unsigned char *image, int width, int height) {

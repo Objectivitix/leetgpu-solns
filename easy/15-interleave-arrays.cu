@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/interleave-arrays
+
 #include <cuda_runtime.h>
 
 __global__ void interleave_kernel(

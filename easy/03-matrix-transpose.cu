@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/matrix-transpose
+
 #include <cuda_runtime.h>
 
 __global__ void matrix_transpose_kernel(

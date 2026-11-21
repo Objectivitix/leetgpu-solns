@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/reverse-array
+
 #include <cuda_runtime.h>
 
 __constant__ int _half_n;

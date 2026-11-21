@@ -1,3 +1,4 @@
+// https://leetgpu.com/challenges/swish-gated-linear-unit
 // how many LUs can there possibly be bro
 
 #include <cuda_runtime.h>

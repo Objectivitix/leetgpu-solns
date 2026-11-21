@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/1d-convolution
+
 #include <cuda_runtime.h>
 
 __constant__ int _output_size;

@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/matrix-multiplication
+
 #include <cuda_runtime.h>
 
 __global__ void matrix_multiplication_kernel(

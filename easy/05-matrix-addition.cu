@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/matrix-addition
+
 #include <cuda_runtime.h>
 
 __constant__ int n_squared;

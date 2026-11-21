@@ -1,3 +1,5 @@
+// https://leetgpu.com/challenges/rainbow-table
+
 #include <cuda_runtime.h>
 
 // Provided hash function.
