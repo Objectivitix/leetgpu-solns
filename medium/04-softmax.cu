@@ -13,11 +13,13 @@
 
 // Performs one step of an array-to-scalar reduction.
 template <typename Func>
-__global__ void reduce_step_kernel(float *arr, int half_m, Func &&reduce_op) {
+__global__ void reduce_step_kernel(
+  float *in, float *out, int half_m, Func &&reduce_op
+) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (i < half_m) {
-    arr[i] = reduce_op(arr[2 * i], arr[2 * i + 1]);
+    out[i] = reduce_op(in[2 * i], in[2 * i + 1]);
   }
 }
 
@@ -30,12 +32,13 @@ void reduce(const float *input, float *output, int N, Func &&reduce_op) {
   const auto input_size = N * sizeof(float);
   const int threads_per_block = 256;
 
-  // starting out as a copy of `input`, `arr` will be our
-  // "workspace" where the first `m` elements (see below)
-  // are intermediate values that remain to be reduced
-  float *arr;
+  float *arr, *arr_out;
+
   assert(cudaMalloc((void **) &arr, input_size) == cudaSuccess);
+  assert(cudaMalloc((void **) &arr_out, input_size) == cudaSuccess);
+
   cudaMemcpy(arr, input, input_size, cudaMemcpyDeviceToDevice);
+  cudaMemcpy(arr_out, input, input_size, cudaMemcpyDeviceToDevice);
 
   // how many items there remain to be reduced;
   // when m == 1, arr[0] is our answer
@@ -46,29 +49,30 @@ void reduce(const float *input, float *output, int N, Func &&reduce_op) {
     const int blocks_n = (half_m + threads_per_block - 1) / threads_per_block;
 
     reduce_step_kernel<<<blocks_n, threads_per_block>>>(
-      arr, half_m, reduce_op
+      arr, arr_out, half_m, reduce_op
     );
-
-    cudaDeviceSynchronize();
 
     if (m & 1) {
       // if m is odd, move the leftover to make pairs
       cudaMemcpy(
-        arr + half_m, arr + half_m * 2,
+        arr_out + half_m, arr + half_m * 2,
         sizeof(float), cudaMemcpyDeviceToDevice
       );
 
       m = half_m + 1;
-      continue;
+    } else {
+      m = half_m;
     }
 
-    m = half_m;
+    cudaDeviceSynchronize();
+    std::swap(arr, arr_out);
   }
 
   // write `arr[0]` to `output`
   cudaMemcpy(output, arr, sizeof(float), cudaMemcpyDeviceToDevice);
 
   cudaFree(arr);
+  cudaFree(arr_out);
 }
 
 // Subtracts `c` from each element of `input`,
