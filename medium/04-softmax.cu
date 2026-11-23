@@ -6,6 +6,7 @@
 // sum and max reduction both take Θ(lg N), and elementwise exp
 // and division both take Θ(1), the solution follows naturally.
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 
@@ -14,7 +15,7 @@
 // Performs one step of an array-to-scalar reduction.
 template <typename Func>
 __global__ void reduce_step_kernel(
-  float *in, float *out, int half_m, Func &&reduce_op
+  float *in, float *out, int half_m, Func reduce_op
 ) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -28,7 +29,7 @@ __global__ void reduce_step_kernel(
 //   device pointers: `input`, `output`.
 //   effects: Writes to `output`.
 template <typename Func>
-void reduce(const float *input, float *output, int N, Func &&reduce_op) {
+void reduce(const float *input, float *output, int N, Func reduce_op) {
   const auto input_size = N * sizeof(float);
   const int threads_per_block = 256;
 
@@ -74,25 +75,14 @@ void reduce(const float *input, float *output, int N, Func &&reduce_op) {
   cudaFree(arr_out);
 }
 
-// Subtracts `c` from each element of `input`,
-// and stores the result in `output`.
-__global__ void subtract_kernel(
-  const float *input, float *output, int N, float *c
+// For each element `x` of `input`, stores fn(x)
+// to the corresponding index in `output`.
+template <typename Func>
+__global__ void map_kernel(
+  const float *input, float *output, int N, Func fn
 ) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < N) output[i] = input[i] - *c;
-}
-
-// Exponentiates each element of `arr`.
-__global__ void exp_kernel(float *arr, int N) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < N) arr[i] = std::exp(arr[i]);
-}
-
-// Divides each element of `arr` by `c`.
-__global__ void divide_kernel(float *arr, int N, float *c) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < N) arr[i] /= *c;
+  if (i < N) output[i] = fn(input[i]);
 }
 
 // input, output are device pointers
@@ -107,14 +97,21 @@ extern "C" void solve(const float *input, float *output, int N) {
   const int threads_per_block = 256;
   const int blocks_n = (N + threads_per_block - 1) / threads_per_block;
 
-  subtract_kernel<<<blocks_n, threads_per_block>>>(
-    input, output, N, max
+  map_kernel<<<blocks_n, threads_per_block>>>(
+    input, output, N, [max] __device__ (float x) {
+      return x - *max;
+    }
   );
 
   cudaDeviceSynchronize();
   cudaFree(max);
 
-  exp_kernel<<<blocks_n, threads_per_block>>>(output, N);
+  map_kernel<<<blocks_n, threads_per_block>>>(
+    output, output, N, [] __device__ (float x) {
+      return std::exp(x);
+    }
+  );
+
   cudaDeviceSynchronize();
 
   float *total;
@@ -124,8 +121,12 @@ extern "C" void solve(const float *input, float *output, int N) {
     return x + y;
   });
 
-  divide_kernel<<<blocks_n, threads_per_block>>>(output, N, total);
-  cudaDeviceSynchronize();
+  map_kernel<<<blocks_n, threads_per_block>>>(
+    output, output, N, [total] __device__ (float x) {
+      return x / *total;
+    }
+  );
 
+  cudaDeviceSynchronize();
   cudaFree(total);
 }
