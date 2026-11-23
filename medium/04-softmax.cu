@@ -15,7 +15,7 @@
 // Performs one step of an array-to-scalar reduction.
 template <typename Func>
 __global__ void reduce_step_kernel(
-  float *in, float *out, int half_m, Func reduce_op
+  const float *in, float *out, int half_m, Func reduce_op
 ) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 

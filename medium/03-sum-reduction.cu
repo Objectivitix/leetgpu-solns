@@ -8,7 +8,7 @@
 
 #include <cuda_runtime.h>
 
-__global__ void reduce_step_kernel(float *in, float *out, int half_m) {
+__global__ void reduce_step_kernel(const float *in, float *out, int half_m) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (i < half_m) {
