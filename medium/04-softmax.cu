@@ -38,7 +38,6 @@ void reduce(const float *input, float *output, int N, Func &&reduce_op) {
   assert(cudaMalloc((void **) &arr_out, input_size) == cudaSuccess);
 
   cudaMemcpy(arr, input, input_size, cudaMemcpyDeviceToDevice);
-  cudaMemcpy(arr_out, input, input_size, cudaMemcpyDeviceToDevice);
 
   // how many items there remain to be reduced;
   // when m == 1, arr[0] is our answer
