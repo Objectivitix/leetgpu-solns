@@ -97,14 +97,10 @@ void batch_reduce(
       arr, arr_out, k, N, half_m, reduce_op
     );
 
-    cudaDeviceSynchronize();
-
     if (m & 1) {
       _batch_reduce_move_leftover_kernel <<<blocks_n, threads_per_block>>> (
         arr, arr_out, k, N, half_m
       );
-
-      cudaDeviceSynchronize();
 
       m = half_m + 1;
     } else {
@@ -157,7 +153,7 @@ void batch_softmax(const float *input, float *output, int k, int N) {
     }
   );
 
-  cudaDeviceSynchronize();
+  cudaDeviceSynchronize();  // sync before free
   cudaFree(max);
 
   row_map_kernel <<<mat_blocks_n, mat_threads_per_block>>> (
@@ -165,8 +161,6 @@ void batch_softmax(const float *input, float *output, int k, int N) {
       return std::exp(x);
     }
   );
-
-  cudaDeviceSynchronize();
 
   float *total;
   assert(cudaMalloc((void **) &total, k * sizeof(float)) == cudaSuccess);
@@ -181,7 +175,7 @@ void batch_softmax(const float *input, float *output, int k, int N) {
     }
   );
 
-  cudaDeviceSynchronize();
+  cudaDeviceSynchronize();  // sync before free
   cudaFree(total);
 }
 
