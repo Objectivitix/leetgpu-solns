@@ -27,7 +27,10 @@ __global__ void _batch_reduce_step_kernel(
   }
 }
 
-__global__ void _batch_reduce_step_cleanup_kernel(
+// If `m` is odd, this kernel should be launched after a
+// batch-reduce step to move the singled-out leftovers in,
+// forming pairs for the next reduction step.
+__global__ void _batch_reduce_move_leftover_kernel(
   const float *in, float *out, int k, int N, int half_m
 ) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -38,6 +41,8 @@ __global__ void _batch_reduce_step_cleanup_kernel(
   }
 }
 
+// Used at the end of batch reduction to write the final
+// answers to `out`, an array of shape k.
 __global__ void _batch_reduce_write_output_kernel(
   const float *in, float *out, int k, int N
 ) {
@@ -64,6 +69,7 @@ void batch_reduce(
   // function, k and N are of the same order.
   const dim3 mat_threads_per_block(16, 16);
 
+  // these are used for the more "one-dimensional" kernels
   const int threads_per_block = 256;
   const int blocks_n = (
     (k + threads_per_block - 1) / threads_per_block
@@ -87,31 +93,28 @@ void batch_reduce(
       (k + mat_threads_per_block.y - 1) / mat_threads_per_block.y
     );
 
-    _batch_reduce_step_kernel<<<mat_blocks_n, mat_threads_per_block>>>(
+    _batch_reduce_step_kernel <<<mat_blocks_n, mat_threads_per_block>>> (
       arr, arr_out, k, N, half_m, reduce_op
     );
 
     cudaDeviceSynchronize();
 
     if (m & 1) {
-      // if m is odd, move the leftover to make pairs
-      _batch_reduce_step_cleanup_kernel<<<blocks_n, threads_per_block>>>(
+      _batch_reduce_move_leftover_kernel <<<blocks_n, threads_per_block>>> (
         arr, arr_out, k, N, half_m
       );
 
       cudaDeviceSynchronize();
 
       m = half_m + 1;
-    }
-
-    else {
+    } else {
       m = half_m;
     }
 
     std::swap(arr, arr_out);
   }
 
-  _batch_reduce_write_output_kernel<<<blocks_n, threads_per_block>>>(
+  _batch_reduce_write_output_kernel <<<blocks_n, threads_per_block>>> (
     arr, output, k, N
   );
 
@@ -119,24 +122,18 @@ void batch_reduce(
   cudaFree(arr_out);
 }
 
-// For each element `x` of `input`, stores fn(x)
-// to the corresponding index in `output`.
-template <typename Func>
-__global__ void map_kernel(
-  const float *input, float *output, int N, Func fn
-) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < N) output[i] = fn(input[i]);
-}
-
-// For each element `x` of `input`, stores fn(x)
-// to the corresponding index in `output`.
+// For each element x in row i of `input`, stores
+// fn(x, i) to the corresponding cell in `output`.
 template <typename Func>
 __global__ void row_map_kernel(
   const float *input, float *output, int k, int N, Func fn
 ) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < k * N) output[i] = fn(input[i], i / N);
+  int i = blockIdx.y * blockDim.y + threadIdx.y;
+  int j = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (i < k && j < N) {
+    output[i * N + j] = fn(input[i * N + j], i);
+  }
 }
 
 // Computes softmax(input) row-wise and stores result in `output`.
@@ -148,11 +145,14 @@ void batch_softmax(const float *input, float *output, int k, int N) {
     return std::max(x, y);
   });
 
-  const int threads_per_block = 256;
-  const int blocks_n = (k * N + threads_per_block - 1) / threads_per_block;
+  const dim3 mat_threads_per_block(16, 16);
+  const dim3 mat_blocks_n(
+    (N + mat_threads_per_block.x - 1) / mat_threads_per_block.x,
+    (k + mat_threads_per_block.y - 1) / mat_threads_per_block.y
+  );
 
-  row_map_kernel<<<blocks_n, threads_per_block>>>(
-    input, output, k, N, [max] __device__ (float x, int row) {
+  row_map_kernel <<<mat_blocks_n, mat_threads_per_block>>> (
+    input, output, k, N, [max] __device__ (float x, int row) -> float {
       return x - max[row];
     }
   );
@@ -160,8 +160,8 @@ void batch_softmax(const float *input, float *output, int k, int N) {
   cudaDeviceSynchronize();
   cudaFree(max);
 
-  map_kernel<<<blocks_n, threads_per_block>>>(
-    output, output, k * N, [] __device__ (float x) {
+  row_map_kernel <<<mat_blocks_n, mat_threads_per_block>>> (
+    output, output, k, N, [] __device__ (float x, int) -> float {
       return std::exp(x);
     }
   );
@@ -175,8 +175,8 @@ void batch_softmax(const float *input, float *output, int k, int N) {
     return x + y;
   });
 
-  row_map_kernel<<<blocks_n, threads_per_block>>>(
-    output, output, k, N, [total] __device__ (float x, int row) {
+  row_map_kernel <<<mat_blocks_n, mat_threads_per_block>>> (
+    output, output, k, N, [total] __device__ (float x, int row) -> float {
       return x / total[row];
     }
   );
@@ -220,9 +220,8 @@ extern "C" void solve(
   const float sqrt_d = std::sqrt(d);
 
   float *intermediate;  // MxN matrix holding many in-between results
-  assert(
-    cudaMalloc((void **) &intermediate, M * N * sizeof(float)) == cudaSuccess
-  );
+  const int interm_size = M * N * sizeof(float);
+  assert(cudaMalloc((void **) &intermediate, interm_size) == cudaSuccess);
 
   const dim3 mat_threads_per_block(16, 16);
   const dim3 mat_blocks_n(
@@ -234,11 +233,9 @@ extern "C" void solve(
     Q, K, intermediate, M, d, N
   );
 
-  const int threads_per_block = 256;
-  const int blocks_n = (M * N + threads_per_block - 1) / threads_per_block;
-
-  map_kernel<<<blocks_n, threads_per_block>>>(
-    intermediate, intermediate, M * N, [sqrt_d] __device__ (float x) {
+  row_map_kernel <<<mat_blocks_n, mat_threads_per_block>>> (
+    intermediate, intermediate, M, N,
+    [sqrt_d] __device__ (float x, int) -> float {
       return x / sqrt_d;
     }
   );
